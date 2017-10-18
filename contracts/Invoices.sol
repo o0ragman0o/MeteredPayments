@@ -120,8 +120,8 @@ contract Invoice
         return true;
     }
     
-    /// @notice Change resource to `_resource`
-    /// @param _resource
+    /// @notice Change the resource to `_resource`
+    /// @param _resource A key or short text to be stored as the resource.
     /// @return Boolean success value
     function changeResource(bytes32 _resource)
         public

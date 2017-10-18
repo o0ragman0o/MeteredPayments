@@ -1,7 +1,7 @@
 /*
 file:   PayableERC20.sol
 ver:    0.4.2
-updated:17-Oct-2017
+updated:18-Oct-2017
 author: Darryl Morris
 email:  o0ragman0o AT gmail.com
 
@@ -13,8 +13,8 @@ Doing so will result in permanent loss of ether.
 * These tokens may not be suitable for state channel transfers as no ether
 balances will be accounted for
 
-The supply of this token is a constant of 100,000,000 which can intuitively
-represent 100.000000% to be distributed to holders.
+The supply of this token is a constant of 100 tokens with 9 decimal places
+which can intuitively represent 100.000000000% to be distributed to holders.
 
 
 This software is distributed in the hope that it will be useful,
@@ -28,6 +28,7 @@ Release notes
 * Changed to withdrawAll functions to `withdrawAll()`,`withdrawAllTo()`,
   `withdrawAllFor()` and `withdrawAllFrom()`
 * Using SandalStraps 0.4.0
+* changed to 9 decimal places
 
 */
 
@@ -117,14 +118,14 @@ contract PayableERC20Abstract is ERC20Abstract, WithdrawableMinItfc
 {
 /* Constants */
 
-    // 100.000000% supply
-    uint64 constant TOTALSUPPLY = 100000000;
+    // 100.000000000% supply
+    uint64 constant TOTALSUPPLY = 100000000000;
     
-    // 6 decimal places
-    uint8 constant DECIMALS = 6;
+    // 9 decimal places
+    uint8 constant DECIMALS = 9;
     
     // 0.2% of tokens are awarded to creator
-    uint64 constant COMMISION = 200000;
+    uint64 constant COMMISION = 200000000;
     
     /// @return Tokens untouched for 1 year can be redistributed
     // uint64 public constant ORPHANED_PERIOD = 3 years;
@@ -613,8 +614,8 @@ contract PayableERC20 is
         onlyOwner
     {
         // must flush all ether balances first. But imprecision may have
-        // accumulated  under 100,000,000 wei
-        require(this.balance <= 100000000);
+        // accumulated  under 100,000,000,000 wei
+        require(this.balance <= 100000000000);
         selfdestruct(msg.sender);
     }
 

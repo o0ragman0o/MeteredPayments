@@ -73,19 +73,10 @@ to the senders address when provided the correct password.
 This is a `PayableERC` and `EscrowingITO` by which funders can recieve shares
 of returned payments.
 
-### Utility Tokens (in progress)
-Utility tokens are ERC20 contracts that can be aware of and interact with other
-contracts through the standard `transfer()` functions.
-
-### EthenianDAO (in progress)
-Modular contract Liquid Democracy building on top of the SandalStraps and
-PayPipes frameworks.
-
-
 ### Commissions
 In order to help fund this development work, these contracts collect a 0.2%
 commission upon the ether cash flows that pass through them. These commissions
 will be withdrawn back through the respective contract factories into the
 official SandalStraps `PayableERC20` contract named `Fee Parking (FPK)`.
 
-instances -> factories -> SandalStraps -> FeeParking -> FPK token holders
+instances -> factories -> SandalStraps -> sswallet -> FeeParking -> FPK token holders

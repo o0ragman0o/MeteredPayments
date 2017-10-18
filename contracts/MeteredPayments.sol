@@ -51,7 +51,7 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
         // Timestamp of last withdrawal
         uint40 lastWithdrawal;
         // Prevent the owner from changing the recipient address
-        bool lock
+        bool locked;
         // Wei per second payout rate
         uint168 rate;
     }
@@ -186,7 +186,7 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
 
         // Write recipient state
         recipient.period = _period;
-        recipient.rate = uint176(rate);
+        recipient.rate = uint168(rate);
         recipient.lastWithdrawal= _startTime;
 
         committedTime += _period - period;
@@ -207,11 +207,11 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
     /// @notice Set recipient lock for `msg.sender` to `_lock`
     /// @param _lock The recipent address lock state
     /// @return Boolean success value
-    function lockAddress(bool _lock)
+    function lock(bool _lock)
         public
         returns (bool)
     {
-        recipients[msg.sender].lock = _lock;
+        recipients[msg.sender].locked = _lock;
         return true;
     }
     
@@ -225,7 +225,7 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
         returns (bool)
     {
         require(msg.sender == _old
-                || (msg.sender == owner && !recipients[old].lock));
+                || (msg.sender == owner && !recipients[_old].locked));
         recipients[_new] = recipients[_old];
         delete recipients[_old];
 
