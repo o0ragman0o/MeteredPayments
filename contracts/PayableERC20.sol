@@ -1,7 +1,7 @@
 /*
 file:   PayableERC20.sol
-ver:    0.4.2
-updated:18-Oct-2017
+ver:    0.4.3
+updated:26-Oct-2017
 author: Darryl Morris
 email:  o0ragman0o AT gmail.com
 
@@ -13,8 +13,8 @@ Doing so will result in permanent loss of ether.
 * These tokens may not be suitable for state channel transfers as no ether
 balances will be accounted for
 
-The supply of this token is a constant of 100 tokens with 9 decimal places
-which can intuitively represent 100.000000000% to be distributed to holders.
+The supply of this token is a constant of 100 tokens with 18 decimal places
+which can intuitively represent 100% to be distributed to holders.
 
 
 This software is distributed in the hope that it will be useful,
@@ -28,8 +28,11 @@ Release notes
 * Changed to withdrawAll functions to `withdrawAll()`,`withdrawAllTo()`,
   `withdrawAllFor()` and `withdrawAllFrom()`
 * Using SandalStraps 0.4.0
-* changed to 9 decimal places
-
+* Removed 'acceptingDeposit' blocking
+* changed to 18 decimal places
+* retyped balances to uint192
+* using safe casting for uint64 and uint192
+* touch() now processing an array of addresses
 */
 
 pragma solidity ^0.4.13;
@@ -39,6 +42,7 @@ import "https://github.com/o0ragman0o/ReentryProtected/ReentryProtected.sol";
 import "https://github.com/o0ragman0o/SandalStraps/contracts/Factory.sol";
 import "https://github.com/o0ragman0o/Withdrawable/contracts/Withdrawable.sol";
 
+
 // ERC20 Standard Token Abstract including state variables
 contract ERC20Abstract
 {
@@ -47,7 +51,7 @@ contract ERC20Abstract
 /* State Valiables */
 
     /// @return
-    uint public decimals;
+    uint8 public decimals;
     
     /// @return Token symbol
     string public symbol;
@@ -113,29 +117,32 @@ contract ERC20Abstract
 }
 
 
-// contract PayableERC20Abstract is ERC20Interface, WithdrawableMinItfc
 contract PayableERC20Abstract is ERC20Abstract, WithdrawableMinItfc
 {
 /* Constants */
 
-    // 100.000000000% supply
-    uint64 constant TOTALSUPPLY = 100000000000;
+    // Token decimal places
+    uint8 constant DECIMALS = 18;
     
-    // 9 decimal places
-    uint8 constant DECIMALS = 9;
+    // Unit token multiplier
+    uint192 constant TOKEN = uint192(10)**DECIMALS;
+    
+    // 100.000...% supply
+    uint192 constant TOTALSUPPLY = 100 * TOKEN;
     
     // 0.2% of tokens are awarded to creator
-    uint64 constant COMMISION = 200000000;
+    uint192 constant COMMISION = TOKEN / 5;
     
-    /// @return Tokens untouched for 1 year can be redistributed
-    // uint64 public constant ORPHANED_PERIOD = 3 years;
-    uint64 public constant ORPHANED_PERIOD = 3 minutes;
+    // Tokens and their ether untouched for 3 years can be salvaged by
+    // anyone
+    uint64 public constant ORPHANED_PERIOD = 3 years;
 
 /* Structs */
 
+    // Holder state takes 3 slots + 'allowed' mapping
     struct Holder {
         // Token balance.
-        uint64 balance;
+        uint192 balance;
         
         // Last time the account was touched.
         uint64 lastTouched;
@@ -152,14 +159,9 @@ contract PayableERC20Abstract is ERC20Abstract, WithdrawableMinItfc
 
 /* State Valiables */
 
-    /// @return Whether the contract is accepting payments
-    bool public acceptingDeposits;
-
     // Mapping of holder accounts
     mapping (address => Holder) holders;
 
-    event AcceptingDeposits(bool indexed _accept);
-    
 /* Events */
 
     /// @dev Triggered upon a redistribution of untouched tokens
@@ -190,13 +192,19 @@ contract PayableERC20Abstract is ERC20Abstract, WithdrawableMinItfc
     /// required as no state is mutated. 
     function() public payable;
 
-    /// @notice Set the token symbol to `_symbol`. This can only be done once!
-    /// @param _symbol The chosen token symbol
-    /// @return success
-    function setSymbol(string _symbol) public returns (bool);
+    /// @return The total deposits recived by the contract since deployment
+    function deposits() public view returns (uint);
     
+    /// @param _addr An Ethereum address
+    /// @return The balance of ether withdrawable by `_addr`
+    function etherBalanceOf(address _addr) public view returns (uint);
+
     /// @return Timestamp when an account is considered orphaned
-    function orphanedAfter(address _addr) public constant returns (uint64);
+    function orphanedAfter(address _addr) public view returns (uint);
+
+    /// @param _addr An address to enquire current orphan state
+    /// @return Boolean value as to the whether the address is orphaned or not
+    function isOrphaned(address _addr) public view returns (bool);
 
     /// @notice Claim tokens of orphaned account `_addr`
     /// @param _addr Address of orphaned account
@@ -204,9 +212,9 @@ contract PayableERC20Abstract is ERC20Abstract, WithdrawableMinItfc
     function salvageOrphanedTokens(address _addr) public returns (bool);
     
     /// @notice Refresh the time to orphan of holder account `_addr`
-    /// @param _addr the address of a holder
+    /// @param _addrs An array of holder addresses to touch
     /// @return success
-    function touch(address _addr) public returns (bool);
+    function touch(address[] _addrs) public returns (bool);
 
     /// @notice Transfer `_value` tokens from ERC20 contract at `_addr` to `_to`
     /// @param _kAddr Address of and external ERC20 contract
@@ -214,6 +222,20 @@ contract PayableERC20Abstract is ERC20Abstract, WithdrawableMinItfc
     /// @param _value number of tokens to be transferred
     function transferExternalTokens(address _kAddr, address _to, uint _value)
         public returns (bool);
+
+    /// @notice Withdraw the ether balance of `msg.sender`
+    /// @return Boolean success value
+    function withdrawAll() public returns (bool);
+
+    /// @notice Push payments for an array of addresses
+    /// @param _addrs An array of addresses to process withdrawals for
+    /// @return Boolean success value
+    function withdrawAllFor(address[] _addrs) public returns (bool);
+
+    /// @notice Have contract pull payment from `_kAddr`
+    /// @param _kAddr A Withdrawlable contract
+    /// @return Booleanbalance.
+    function withdrawAllFrom(address _kAddr) public returns (bool);
 }
 
 
@@ -223,12 +245,13 @@ contract PayableERC20 is
     PayableERC20Abstract
 {
     using Math for uint;
-    using Math64 for uint64;
-    
+    using Math for uint64;
+    using Math for uint192;
+
 /* Constants */
     
     /// @return Contract version constant
-    bytes32 public constant VERSION = "PayableERC20 v0.4.2";
+    bytes32 public constant VERSION = "PayableERC20 v0.4.3";
 
 /* State Valiables */
 
@@ -248,30 +271,33 @@ contract PayableERC20 is
     {
         _creator = _creator == 0x0 ? owner : _creator;
         decimals = DECIMALS;
-        acceptingDeposits = true;
-        holders[owner].balance = TOTALSUPPLY.sub(COMMISION);
-        holders[owner].lastTouched = uint64(now);
+        
+        // Mint tokens to owner and commission addresses
+        holders[owner].balance = TOTALSUPPLY.sub(COMMISION).to192();
+        holders[owner].lastTouched = now.to64();
         Transfer(0x0, owner, TOTALSUPPLY.sub(COMMISION));
-        holders[_creator].balance = holders[_creator].balance.add(COMMISION);
-        holders[_creator].lastTouched = uint64(now);
+        
+        holders[_creator].balance = 
+                holders[_creator].balance.add(COMMISION).to192();
+        holders[_creator].lastTouched = now.to64();
         Transfer(0x0, _creator, COMMISION);
     }
 
-    /// @dev Deposits only receivable by the default account. Minimum gas is
-    /// required as no state is mutated. 
+    // Can receive ether payments unconditionally
     function()
         public
         payable
     {
-        require(acceptingDeposits);
-        Deposit(msg.sender, msg.value);
+        if (msg.value > 0) {
+            Deposit(msg.sender, msg.value);
+        }
     }
     
 //
 // Getters
 //
 
-    /// @return Standard ERC20 token supply
+    // Standard ERC20 token supply
     function totalSupply()
         public
         view
@@ -280,8 +306,7 @@ contract PayableERC20 is
         return TOTALSUPPLY;
     }
     
-    /// @param _addr An address to discover token balance
-    /// @return Token balance for `_addr` 
+    // Return token balance for `_addr` 
     function balanceOf(address _addr)
         public
         view
@@ -290,8 +315,7 @@ contract PayableERC20 is
         return holders[_addr].balance;
     }
     
-    /// @param _addr An address to discover ether balance
-    /// @return the withdrawable ether balance of `_addr`
+    // Return ether balance for `_addr`
     function etherBalanceOf(address _addr)
         public
         view
@@ -309,18 +333,25 @@ contract PayableERC20 is
         return holders[_owner].allowed[_spender];
     }
 
-    /// @param _addr An address to enquire orphan date
-    /// @return An epoch time after which the account is orphaned
+    // Return total deposits made to the contract since deployment
+    function deposits()
+        public
+        view
+        returns (uint)
+    {
+        return sumDeposits.add(this.balance - lastBalance); 
+    }
+
+    // Return an epoch time after which the account is orphaned
     function orphanedAfter(address _addr)
         public
         view
-        returns (uint64)
+        returns (uint)
     {
         return holders[_addr].lastTouched.add(ORPHANED_PERIOD);
     }
     
-    /// @param _addr An address to enquire current orphan state
-    /// @return Boolean value as to the whether the address is orphaned or not
+    // Return the orphaned state of `_addr`
     function isOrphaned(address _addr)
         public
         view
@@ -340,7 +371,7 @@ contract PayableERC20 is
         noReentry
         returns (bool)
     {
-        xfer(msg.sender, _to, uint64(_amount));
+        xfer(msg.sender, _to, _amount);
         return true;
     }
 
@@ -353,19 +384,18 @@ contract PayableERC20 is
         returns (bool)
     {
         // Validate and adjust allowance
-        uint64 amount = uint64(_amount);
-        require(amount <= holders[_from].allowed[msg.sender]);
+        require(_amount <= holders[_from].allowed[msg.sender]);
         
         // Adjust spender allowance
         holders[_from].allowed[msg.sender] = 
-            holders[_from].allowed[msg.sender].sub(amount);
+            holders[_from].allowed[msg.sender].sub(_amount);
         
-        xfer(_from, _to, amount);
+        xfer(_from, _to, _amount);
         return true;
     }
 
     // Overload the ERC20 xfer() to account for unclaimed ether
-    function xfer(address _from, address _to, uint64 _amount)
+    function xfer(address _from, address _to, uint _amount)
         internal
     {
         // Cache holder structs from storage to memory to avoid excessive SSTORE
@@ -377,15 +407,15 @@ contract PayableERC20 is
         require(_to != address(this));
 
         // Validate amount
-        require(_amount > 0 && _amount <= from.balance);
+        require(_amount <= from.balance);
         
-        // Update party's outstanding claims
+        // Update outstanding ether balance claims
         claimEther(from);
         claimEther(to);
         
         // Transfer tokens
-        from.balance = from.balance.sub(_amount);
-        to.balance = to.balance.add(_amount);
+        from.balance = from.balance.sub(_amount).to192();
+        to.balance = to.balance.add(_amount).to192();
 
         // Commit changes to storage
         holders[_from] = from;
@@ -395,7 +425,6 @@ contract PayableERC20 is
     }
 
     // Approves a third-party spender
-    // Reentry protection prevents attacks upon the state
     function approve(address _spender, uint _amount)
         public
         noReentry
@@ -403,17 +432,12 @@ contract PayableERC20 is
     {
         require(holders[msg.sender].balance != 0);
         
-        holders[msg.sender].allowed[_spender] = uint64(_amount);
+        holders[msg.sender].allowed[_spender] = _amount;
         Approval(msg.sender, _spender, _amount);
         return true;
     }
 
-    /// @notice Transfer `_amount` ERC20 tokens from `_kAddr` owned by this
-    /// address to address `_to`
-    /// @param _kAddr Address of an ERC20 token contract
-    /// @param _to Recipient address
-    /// @param _amount An amount of tokens
-    /// @return Boolean success value
+    // Salvage alien tokens that may have been sent to the contract
     function transferExternalTokens(address _kAddr, address _to, uint _amount)
         public
         onlyOwner
@@ -422,21 +446,22 @@ contract PayableERC20 is
         return ERC20Abstract(_kAddr).transfer(_to, _amount);
     }
 
-    /// @notice Refresh the shelflife of account `_addr`
-    /// @param _addr The address of a holder
-    function touch(address _addr)
+    // Reset the time to orphan countdown for an array of addresses
+    function touch(address[] _addrs)
         public
         noReentry
         returns (bool)
     {
-        require(holders[msg.sender].balance > 0);
-        holders[_addr].lastTouched = uint64(now);
+        for(uint i; i< _addrs.length; i++) {
+            if(holders[_addrs[i]].balance > 0) {
+                holders[_addrs[i]].lastTouched = now.to64();
+            }
+        }
         return true;
     }
 
-    /// @notice Claim tokens and ther of `_addr`
-    /// @param _addr The holder address of orphaned tokens
-    /// @return Boolean success value
+    // Salvage orphaned tokens. Can be called by anyone. If owner is orphaned
+    // ownership is awarded to caller
     function salvageOrphanedTokens(address _addr)
         public
         noReentry
@@ -471,94 +496,6 @@ contract PayableERC20 is
         // Delete ophaned account
         delete holders[_addr];
 
-        return true;
-    }
-    
-//
-// Deposit processing function
-//
-
-    /// @return Total deposits made to the contract to date
-    function deposits()
-        public
-        constant
-        returns (uint)
-    {
-        return sumDeposits.add(this.balance - lastBalance); 
-    }
-    
-    /// @notice Set the payment acceptance state to `_accept`
-    /// @param _accept accept to deny payments to contract
-    /// @return Boolean success value
-    function acceptDeposits(bool _accept)
-        public
-        noReentry
-        onlyOwner
-        returns (bool)
-    {
-        acceptingDeposits = _accept;
-        AcceptingDeposits(_accept);
-        return true;
-    }
-
-//
-// Withdrawal processing functions
-//
-
-    /// @notice Withdraw the calling address's available balance
-    /// @return Boolean success value
-    function withdrawAll()
-        public
-        returns (bool)
-    {
-        return intlWithdraw(msg.sender, msg.sender);
-    }
-
-    /// @notice Push payments for an array of addresses
-    /// @param _addrs An array of addresses to process withdrawals for
-    /// @return Boolean success value
-    function withdrawAllFor(address[] _addrs)
-        public
-        returns (bool)
-    {
-        for(uint i; i < _addrs.length; i++) {
-            intlWithdraw(_addrs[i], _addrs[i]);
-        }
-        return true;
-    }
-
-    /// @notice Have contract pull payment from `_kAddr`
-    /// @param _kAddr A Withdrawlable contract
-    /// @return Booleanbalance.
-    // Reentry is prevented to all but the default function to recieve payment.
-    function withdrawAllFrom(address _kAddr)
-        public
-        preventReentry
-        returns (bool)
-    {
-        return WithdrawableAbstract(_kAddr).withdrawAll();
-    }
-    
-    // Account withdrawl function
-    function intlWithdraw(address _from, address _to)
-        internal
-        preventReentry
-        returns (bool)
-    {
-        Holder memory holder = holders[_from];
-        claimEther(holder);
-        
-        // check balance and withdraw on valid amount
-        uint value = holder.etherBalance;
-        require(value > 0);
-        holder.etherBalance = 0;
-        holders[_from] = holder;
-        
-        // snapshot adjusted contract balance
-        lastBalance = lastBalance.sub(value);
-        
-        Withdrawal(_from, _to, value);
-        _to.transfer(value);
         return true;
     }
 
@@ -596,18 +533,74 @@ contract PayableERC20 is
         // Snapshot deposits summation
         holder.lastSumDeposits = sumDeposits;
 
-        // touch
-        holder.lastTouched = uint64(now).add(ORPHANED_PERIOD);
+        // Reset orhpan timer
+        holder.lastTouched = now.add(ORPHANED_PERIOD).to64();
 
         return holder;
+    }
+
+//
+// Withdrawal processing functions
+//
+
+    // Withdraw the calling address's available balance
+    function withdrawAll()
+        public
+        preventReentry
+        returns (bool)
+    {
+        return intlWithdraw(msg.sender, msg.sender);
+    }
+
+    // Push ether payments for an array of addresses
+    function withdrawAllFor(address[] _addrs)
+        public
+        preventReentry
+        returns (bool)
+    {
+        for(uint i; i < _addrs.length; i++) {
+            intlWithdraw(_addrs[i], _addrs[i]);
+        }
+        return true;
+    }
+
+    // Have the contract pull a payment from another withdrawable contract
+    function withdrawAllFrom(address _kAddr)
+        public
+        preventReentry
+        returns (bool)
+    {
+        return WithdrawableMinItfc(_kAddr).withdrawAll();
+    }
+    
+    // Account withdrawl function
+    function intlWithdraw(address _from, address _to)
+        internal
+        returns (bool)
+    {
+        Holder memory holder = holders[_from];
+        claimEther(holder);
+        
+        // check balance and withdraw on valid amount
+        uint value = holder.etherBalance;
+        require(value > 0);
+        holder.etherBalance = 0;
+        holders[_from] = holder;
+        
+        // snapshot adjusted contract balance
+        lastBalance = lastBalance.sub(value);
+        
+        Withdrawal(_from, _to, value);
+        _to.transfer(value);
+        return true;
     }
 
 //
 // Contract managment functions
 //
 
-    /// @notice Owner can selfdestruct the contract on the condition it has
-    /// near zero balance
+    // Owner can selfdestruct the contract on the condition it has near zero
+    // balance
     function destroy()
         public
         noReentry
@@ -619,40 +612,20 @@ contract PayableERC20 is
         selfdestruct(msg.sender);
     }
 
-    /// @notice Set the token symbol to `_symbol`. This can only be set once
-    /// @param _symbol The token symbol
-    /// @return Boolean success value
-    function setSymbol(string _symbol)
+    // Set name and symbol of the token
+    function _init(string _name, string _symbol)
         public
         onlyOwner
-        noReentry
         returns (bool)
     {
         require(bytes(symbol).length == 0);
+        require(bytes(name).length == 0);
+        name = _name;
         symbol = _symbol;
         return true;
     }
 
-    /// @notice Set the token name to `_name`. This can only be set once
-    /// @param _name The token symbol
-    /// @return Boolean success value
-    function setName(string _name)
-        public
-        onlyOwner
-        noReentry
-        returns (bool)
-    {
-        require(bytes(name).length == 0);
-        name = _name;
-        return true;
-    }
-    
-    /// @dev For low level calls to external contracts
-    /// @notice Call external contract at `_kAddr` sending `msg.value` and data
-    /// `_data`
-    /// @param _kAddr A contract address
-    /// @param _data Call data sent to contract
-    /// @return boolean success value
+    // Perform a low level call to another contract
     function callAsContract(address _kAddr, bytes _data)
         public
         payable
@@ -673,7 +646,7 @@ contract PayableERC20Factory is Factory
 //
 
     bytes32 constant public regName = "payableerc20";
-    bytes32 constant public VERSION = "PayableERC20Factory v0.4.2";
+    bytes32 constant public VERSION = "PayableERC20Factory v0.4.3";
 
 //
 // Functions

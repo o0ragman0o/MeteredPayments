@@ -1,24 +1,23 @@
 /******************************************************************************\
 
 file:   Invoices.sol
-ver:    0.4.0
-updated:17-Oct-2017
+ver:    0.4.1
+updated:25-Oct-2017
 author: Darryl Morris
 email:  o0ragman0o AT gmail.com
 
 A SandalStraps compliant factory to create invoice payment channels.
 
-
 Contracts:
 - Invoice
     SandalStraps compliant
-    Created by Invoices contract.
+    Created by `Invoices` contract.
     Client sends money to this contract
-    Payments are withdrawn to Invoices contract
+    Payments are withdrawn to `Invoices` contract
     
 - Invoices
     SandalStraps compliant
-    Created by InvoicesFactory
+    Created by `InvoicesFactory`
     Central collector and Registrar of all invoices it creates.
     Charges 0.2% fee from payments, claimable by InvoicesFactory owner
     
@@ -33,12 +32,14 @@ See MIT Licence for further details.
     
 Release notes
 -------------
-* Using Sandalstraps 0.4.0
-* Using Withdrawable 0.4.0 API
+* Non blocking deposits. 
+* Added refund address to Invoice for excess payments
+
 \******************************************************************************/
 
 pragma solidity ^0.4.13;
 
+import "https://github.com/o0ragman0o/Math/Math.sol";
 import "https://github.com/o0ragman0o/SandalStraps/contracts/Registrar.sol";
 import "https://github.com/o0ragman0o/Withdrawable/contracts/Withdrawable.sol";
 
@@ -48,6 +49,8 @@ import "https://github.com/o0ragman0o/Withdrawable/contracts/Withdrawable.sol";
 //
 contract Invoice
 {
+    using Math for uint;
+    
     bytes32 constant public VERSION = "Invoice v0.4.0";
     
     // Payments state used to prevent contract destruction after a payment
@@ -55,6 +58,9 @@ contract Invoice
     
     /// @return The contract owner address, being the creating Invoices contract instance
     address public owner;
+    
+    /// @return The refund address which collects excess payments
+    address public refundTo;
     
     /// @return The SandalStraps registration name
     bytes32 public regName;
@@ -78,13 +84,16 @@ contract Invoice
 
     /// @notice Create a new Invoice for invoice `_invoiceHash` with value of `_value`
     /// @param _value The value to be paid in ether.
-    function Invoice(bytes32 _regName, bytes32 _resource, uint _value)
+    function Invoice(
+            bytes32 _regName, bytes32 _resource,
+            uint _value, address _refundTo)
         public
     {
         owner = msg.sender;
         regName = _regName;
         resource = _resource;
         outstanding = _value;
+        refundTo = _refundTo;
     }
     
     /// @return The outstanding payments amount
@@ -93,7 +102,7 @@ contract Invoice
         view
         returns (uint)
     {
-        return outstanding - this.balance;
+        return outstanding > this.balance ? outstanding - this.balance : 0;
     }
     
     /// @dev Accepts trivial transaction payments
@@ -102,7 +111,6 @@ contract Invoice
         payable
     {
         if (msg.value > 0) {
-            require(this.balance <= outstanding);
             Deposit(msg.sender, msg.value);
         }
     }
@@ -113,10 +121,25 @@ contract Invoice
         public
         returns (bool)
     {
-        if (this.balance > 0 && noPayments) delete noPayments;
-        outstanding -= this.balance;
-        Withdrawal(msg.sender, owner, this.balance);
-        owner.transfer(this.balance);
+        if (this.balance > 0 && noPayments) {
+            // Have recieved ether. Blow the no payments flag.
+            delete noPayments;
+        }
+        
+        uint payment = amountDue();
+        
+        if (payment > 0) {
+            outstanding = outstanding.sub(payment);
+            // Send a payment to Invoice owner
+            Withdrawal(owner, owner, payment);
+            owner.transfer(payment);
+        }
+        
+        if (this.balance > 0) {
+            // Refund any remain ether
+            Withdrawal(refundTo, refundTo, this.balance);
+            refundTo.transfer(this.balance);
+        }
         return true;
     }
     
@@ -158,18 +181,21 @@ contract Invoices is Registrar, WithdrawableMinItfc {
     uint constant COMMISSION_DIV = 500;
 
     /// @return The address which created this instance 
-    address public creator;
+    address public commissionWallet;
 
     /// @dev Logged when a new invoice is created
     /// @param _kAddr The address of the invoice contract
     /// @param _value ether value of payment due to the invoice contract
-    event NewInvoice(address indexed _kAddr, uint _value);
+    event NewInvoice(
+        address indexed _kAddr,
+        uint _value,
+        address indexed _refundTo);
 
     function Invoices(address _creator, bytes32 _regName, address _owner)
         public
         Registrar(_creator, _regName, _owner)
     {
-            creator = msg.sender;
+            commissionWallet = _creator;
     }
     
     /// @dev Default is payable
@@ -191,22 +217,28 @@ contract Invoices is Registrar, WithdrawableMinItfc {
     {
         return
             _addr == owner ? this.balance - this.balance / COMMISSION_DIV :
-            _addr == creator ? this.balance / COMMISSION_DIV :
+            _addr == commissionWallet ? this.balance / COMMISSION_DIV :
             0;
     }
     
     /// @notice Create a new invoice `_regName` for `_value` ether
-    /// @param _regName A Sandalstraps registry name
+    /// @param _regName A Sandalstraps compliant registry name
     /// @param _value A value in ether
-    function newInvoice(bytes32 _regName, bytes32 _resource, uint _value)
+    function newInvoice(
+            bytes32 _regName, bytes32 _resource, 
+            uint _value, address _refundTo)
         public
         onlyOwner
         returns (address kAddr_)
     {
-        address invoice = new Invoice(_regName, _resource, _value);
-        add(invoice);
-        NewInvoice(invoice, _value);
-        kAddr_ = invoice;
+        // regName must be unique
+        require(addressByName(_regName) == 0x0);
+        // a refund address must be provided
+        require(_refundTo != 0x0);
+        
+        kAddr_ = address(new Invoice(_regName, _resource, _value, _refundTo));
+        add(kAddr_);
+        NewInvoice(kAddr_, _value, _refundTo);
     }
     
     /// @notice Change resource of invoice `_kAddr` to `_resource`
@@ -240,9 +272,9 @@ contract Invoices is Registrar, WithdrawableMinItfc {
         public
         returns (bool)
     {
-        Withdrawal(msg.sender, creator, this.balance / COMMISSION_DIV);
-        Withdrawal(msg.sender, owner, this.balance - this.balance / COMMISSION_DIV);
-        creator.transfer(this.balance / COMMISSION_DIV);
+        Withdrawal(msg.sender, commissionWallet, this.balance / COMMISSION_DIV);
+        commissionWallet.transfer(this.balance / COMMISSION_DIV);
+        Withdrawal(msg.sender, owner, this.balance);
         owner.transfer(this.balance);
         return true;
     }
@@ -292,7 +324,7 @@ contract InvoicesFactory is Factory
         returns (address kAddr_)
     {
         require(_regName != 0x0);
-        kAddr_ = address(new Invoices(msg.sender, _regName, _owner));
+        kAddr_ = address(new Invoices(this, _regName, _owner));
         Created(msg.sender, _regName, kAddr_);
     }
 }

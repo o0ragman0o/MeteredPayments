@@ -1,15 +1,19 @@
 /******************************************************************************\
 
 file:   Forwarder.sol
-ver:    0.4.0
-updated:17-Oct-2017
+ver:    0.4.1
+updated:13-Nov-2017
 author: Darryl Morris (o0ragman0o)
 email:  o0ragman0o AT gmail.com
 
 This file is part of the SandalStraps framework
 
-CallForwarder acts as a proxy address for call pass-through of call data, gas
-and value.
+PassPurse creates password permissioned single use wallets from
+which ether is swept to a calling address if the correct password
+is provided or to the creator if the wallet has expired.
+
+*** WARNING *** This is concept code only. It is vulnerable to 
+front running and miner attacks upon the password at time of claim
 
 This software is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -19,8 +23,6 @@ See MIT Licence for further details.
 
 Release Notes
 -------------
-* Name change from 'Redirector' to 'Forwarder'
-* Changes state name from 'payTo' to 'forwardTo'
 
 \******************************************************************************/
 
@@ -31,17 +33,17 @@ import "https://github.com/o0ragman0o/Withdrawable/contracts/Withdrawable.sol";
 
 contract PassPurse
 {
-    bytes27 pass;
+    bytes27 passHash;
     uint40 public expiry;
     address public owner;
     
     event Deposit(address indexed _from, uint _value);
     
-    function PassPurse(bytes32 _pass, uint _expiry)
+    function PassPurse(bytes32 _passHash, uint _expiry)
         public
         payable
     {
-        pass = bytes27(_pass);
+        passHash = bytes27(_passHash);
         expiry = uint40(_expiry);
         owner = msg.sender;
         if (msg.value > 0) {
@@ -58,16 +60,18 @@ contract PassPurse
         }
     }
     
-// TODO: Prone to front running
+// TODO: Prone to front running. Try requiring a fixed gas price
+// or 2 tx claim and prove model
     function sweep(bytes32 _pass)
         public
     {
         address recip = now > expiry ? owner :
-            bytes27(keccak256(_pass)) == pass ? msg.sender :
+            bytes27(keccak256(_pass)) == passHash ? msg.sender :
             0x0;
         if (recip != 0x0) selfdestruct(recip);
     }
 }
+
 
 contract PassPurses is RegBase, Withdrawable
 {
@@ -78,9 +82,15 @@ contract PassPurses is RegBase, Withdrawable
     /// @return The contract's version constant
     bytes32 constant public VERSION = "PassPurse v0.4.0";
 
+    /// @dev 0.2% commission to creator
+    uint constant COMMISSION_DIV = 500;
+
 //
 // State
 //
+
+    /// @return The commision wallet address
+    address public commissionWallet;
 
     /// @return The forwarding address.
     address[] public purses;
@@ -106,8 +116,7 @@ contract PassPurses is RegBase, Withdrawable
         public
         RegBase(_creator, _regName, _owner)
     {
-        // forwardTo will be set to msg.sender of if _owner == 0x0 or _owner
-        // otherwise
+        commissionWallet = _creator;
     }
     
     /// @dev Transactions are unconditionally forwarded to the forwarding address
@@ -120,23 +129,32 @@ contract PassPurses is RegBase, Withdrawable
         }
     }
 
+    /// @notice Create a PassPurse which expires after `_expiry`
+    /// @param _pass The hash of a password
+    /// @param _expiry An epoch time for expiry
+    /// @param kAddr_ The created purse address
     function createNew(bytes27 _pass, uint _expiry)
         public
         payable
         returns (address kAddr_)
     {
+        Deposit(msg.sender, msg.value);
         kAddr_ = address(new PassPurse(_pass, _expiry));
         purses.push(kAddr_);
         NewPurse(kAddr_, _pass);
+        Withdrawal(this, kAddr_, msg.value - msg.value / COMMISSION_DIV);
+        Withdrawal(commissionWallet, commissionWallet, msg.value / COMMISSION_DIV);
+        commisionWallet.transfer(msg.value / COMMISSION_DIV)
     }
     
+    /// @dev For recovering expired purse funds
     function withdrawAll()
         public
         returns (bool)
     {
+        Withdrawal(owner, owner, this.balance);
         owner.transfer(this.balance);
     }
-    
 }
 
 

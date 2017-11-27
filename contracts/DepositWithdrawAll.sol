@@ -1,7 +1,7 @@
 /******************************************************************************\
 file:   DepositWithdrawAll.sol
-ver:    0.4.0
-updated:9-Oct-2017
+ver:    0.4.1
+updated:19-Oct-2017
 author: Darryl Morris
 email:  o0ragman0o AT gmail.com
 
@@ -16,7 +16,8 @@ See MIT Licence for further details.
     
 Release notes
 -------------
-* First release but using Sandalstraps 0.4.0
+* Removed overloaded events
+* Tweaked logging Withdrawal event
 \******************************************************************************/
 
 pragma solidity ^0.4.13;
@@ -31,7 +32,7 @@ contract DepositWithdrawAll is RegBase, WithdrawableMinItfc
 //
 
     /// @return The version constant
-    bytes32 constant public VERSION = "DepositWithdrawAll v0.4.0";
+    bytes32 constant public VERSION = "DepositWithdrawAll v0.4.1";
 
 //
 // State
@@ -44,17 +45,6 @@ contract DepositWithdrawAll is RegBase, WithdrawableMinItfc
 // Events
 //
 
-    /// @dev Logged upon receiving a deposit
-    /// @param _from The address from which value has been recieved
-    /// @param _value The value of ether received
-    event Deposit(address indexed _from, uint _value);
-    
-    /// @dev Logged upon a withdrawal
-    /// @param _by the address of the withdrawer
-    /// @param _to Address to which value was sent
-    /// @param _value The value in ether which was withdrawn
-    event Withdrawal(address indexed _by, address indexed _to, uint _value);
-    
     // Logged upon change of the forwardTo address
     /// @param _to Address to which withdrawls are sent
     event ForwardingTo(address indexed _to);
@@ -103,7 +93,7 @@ contract DepositWithdrawAll is RegBase, WithdrawableMinItfc
     	public
     	returns (bool)
     {
-    	Withdrawal(msg.sender, forwardTo, this.balance);
+    	Withdrawal(forwardTo, forwardTo, this.balance);
     	forwardTo.transfer(this.balance);
     	return true;
     }
@@ -117,7 +107,7 @@ contract DepositWithdrawAllFactory is Factory
 //
 
     bytes32 constant public regName = "depositwithdrawlall";
-    bytes32 constant public VERSION = "DepositWithdrawAllFactory v0.4.0";
+    bytes32 constant public VERSION = "DepositWithdrawAllFactory v0.4.1";
 
 //
 // Functions

@@ -1,21 +1,20 @@
 /******************************************************************************\
 
 file:   MeteredPayments.sol
-ver:    0.4.0
-updated:17-Oct-2017
+ver:    0.4.1
+updated:26-Oct-2017
 author: Darryl Morris (o0ragman0o)
 email:  o0ragman0o AT gmail.com
 
 This file is ancillary to the SandalStraps framework
 
 `MeteredPayments` is a SandalStraps compliant contract to meter out periodic 
-prefunded payments at a chosen rate. The recipient must call `withdrawAll()`
-to pull the payments due up to that time.
+prefunded payments at a chosen rate.
 
 Payments are setup and adjusted by calling 
 `changePayment(_addr, _startTime, _period)`
 Where `_addr` is recipient address
-`_startTime` is the time when payments can being to be withdrawn
+`_startTime` is the time when payments can begin to be withdrawn
 `_period` is the time in seconds over which the payment is metered out.
 The rate of payment is calculated as the amount sent in `msg.value` / `_period`
 
@@ -33,17 +32,22 @@ See MIT Licence for further details.
 
 Release Notes
 -------------
-* Using Withdrawable 0.4.1
-
+* Using Math library and safe uint casting
 \******************************************************************************/
 
 pragma solidity ^0.4.13;
 
+import "https://github.com/o0ragman0o/Math/Math.sol";
+import "https://github.com/o0ragman0o/ReentryProtected/ReentryProtected.sol";
 import "https://github.com/o0ragman0o/SandalStraps/contracts/Factory.sol";
 import "https://github.com/o0ragman0o/Withdrawable/contracts/Withdrawable.sol";
 
 contract MeteredPayments is RegBase, WithdrawableMinItfc
 {
+    using Math for uint;
+    using Math for uint40;
+    using Math for uint128;
+    
     // Recipient structure records wei/second for payment seconds timeframe
     struct Recipient {
         // Payout period in seconds. Is consumed (reduced) upon withdrawal
@@ -53,16 +57,16 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
         // Prevent the owner from changing the recipient address
         bool locked;
         // Wei per second payout rate
-        uint168 rate;
+        uint128 rate;
     }
     
-    bytes32 public constant VERSION = "MeteredPayments v0.4.0";
+    bytes32 public constant VERSION = "MeteredPayments v0.4.1";
     
     /// @return 0.2% of payments for developer commission
     uint public constant COMMISION_DIV = 500;
 
     /// @return Commission wallet address
-    address public commisionWallet;
+    address public commissionWallet;
     
     /// @return Total time owing across all payments
     uint40 public committedTime;
@@ -97,7 +101,7 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
         public
         RegBase(_creator, _regName, _owner)
     {
-        commisionWallet = _creator;
+        commissionWallet = _creator;
     }
     
     /// @dev For owner to destroy the contract if no payments are pending
@@ -118,11 +122,11 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
     {
         Recipient storage recipient = recipients[_addr];
         
-        if (uint40(now) < recipient.lastWithdrawal) return 0;
-        uint40 period = uint40(now) - recipient.lastWithdrawal;
+        if (now.to40() < recipient.lastWithdrawal) return 0;
+        uint40 period = now.sub(recipient.lastWithdrawal).to40();
         period = period > recipient.period ? recipient.period : period;
         
-        return period * recipient.rate;
+        return period.mul(recipient.rate);
     }
     
     /// @dev Returns maximum payout rate per second (includes payments which
@@ -169,37 +173,37 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
         Recipient storage recipient = recipients[_addr];
 
         // Discover oustanding payment period
-        uint40 period = uint40(now) < recipient.lastWithdrawal ? 0 :
+        uint40 period = now < recipient.lastWithdrawal ? 0 :
                         _period > recipient.period ? recipient.period : 
-                        uint40(now) - recipient.lastWithdrawal;
+                        now.sub(recipient.lastWithdrawal).to40();
         
         // Calculate unclaimed payments
-        uint currentOwing = recipient.rate * period;
+        uint currentOwing = recipient.rate.mul(period);
         // Calculate owner refund is adjusting payments down
-        uint ownerRefund = recipient.rate * (recipient.period - period);
+        uint ownerRefund = recipient.period.sub(period).mul(recipient.rate);
         // Calculate developer commision
-        uint commision = msg.value / COMMISION_DIV;
+        uint commission = msg.value.div(COMMISION_DIV);
         // Calculate final metered payment amount
-        uint payment = msg.value - commision;
+        uint payment = msg.value.sub(commission);
         // Payout rate wei/second
-        uint rate =  payment / _period;
+        uint128 rate = payment.div(_period).to128();
 
         // Write recipient state
         recipient.period = _period;
-        recipient.rate = uint168(rate);
+        recipient.rate = rate;
         recipient.lastWithdrawal= _startTime;
 
-        committedTime += _period - period;
-        committedPayments += payment - ownerRefund;
+        committedTime = committedTime.add(_period).sub(period).to40();
+        committedPayments = committedPayments.add(payment).sub(ownerRefund);
         
         PaymentsChanged(_addr, payment, _startTime, rate);
 
         // Refund owner any difference of previously commited payments
-        intlWithdraw(this, owner, ownerRefund);
+        intlWithdraw(owner, owner, ownerRefund);
         // Pay commision
-        intlWithdraw(this, commisionWallet, commision);
+        intlWithdraw(commissionWallet, commissionWallet, commission);
         // Pay outstanding payments to recipient (least trusted, do last);
-        intlWithdraw(this, _addr, currentOwing);
+        intlWithdraw(_addr, _addr, currentOwing);
 
         return true;
     }
@@ -254,16 +258,16 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
         Recipient memory recipient;
         for(uint i; i < _addrs.length; i++) {
             recipient = recipients[_addrs[i]];
-            if (uint40(now) >= recipient.lastWithdrawal) {
-                uint40 period = uint40(now) - recipient.lastWithdrawal;
+            if (now >= recipient.lastWithdrawal) {
+                uint40 period = now.sub(recipient.lastWithdrawal).to40();
                 period = period > recipient.period ? recipient.period : period;
                 
-                uint value = period * recipient.rate;
-                recipient.period -= period;
-                recipient.lastWithdrawal = uint40(now);
+                uint value = period.mul(recipient.rate);
+                recipient.period = recipient.period.sub(period).to40();
+                recipient.lastWithdrawal = now.to40();
                 
-                committedTime -= period;
-                committedPayments -= value;
+                committedTime = committedTime.sub(period).to40();
+                committedPayments = committedPayments.sub(value);
                 
                 recipients[_addrs[i]] = recipient;
                 // Pay to recipient
@@ -279,9 +283,10 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
     {
         if (_value > 0) {
             Withdrawal(_from, _to, _value);
-            paidOut += _value;
+            paidOut = paidOut.add(_value);
             _to.transfer(_value);
         }
+        return true;
     }
 }
 
@@ -293,7 +298,7 @@ contract MeteredPaymentsFactory is Factory
 //
 
     bytes32 constant public regName = "meteredpayments";
-    bytes32 constant public VERSION = "MeteredPaymentFactory v0.4.0";
+    bytes32 constant public VERSION = "MeteredPaymentFactory v0.4.1";
 
 //
 // Functions
