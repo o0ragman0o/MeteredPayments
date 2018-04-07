@@ -1,7 +1,8 @@
-/*
+/******************************************************************************\
+
 file:   PayableERC20.sol
 ver:    0.4.3
-updated:26-Oct-2017
+updated:27-Nov-2017
 author: Darryl Morris
 email:  o0ragman0o AT gmail.com
 
@@ -25,6 +26,7 @@ See MIT Licence for further details.
 
 Release notes
 -------------
+* Factory deployed on live chain at 0x7D855423502a09Db482D60c81eC30300eB0302C4
 * Changed to withdrawAll functions to `withdrawAll()`,`withdrawAllTo()`,
   `withdrawAllFor()` and `withdrawAllFrom()`
 * Using SandalStraps 0.4.0
@@ -33,7 +35,8 @@ Release notes
 * retyped balances to uint192
 * using safe casting for uint64 and uint192
 * touch() now processing an array of addresses
-*/
+
+\******************************************************************************/
 
 pragma solidity ^0.4.13;
 
@@ -639,6 +642,7 @@ contract PayableERC20 is
 }
 
 
+// Deployed @ 0x7D855423502a09Db482D60c81eC30300eB0302C4
 contract PayableERC20Factory is Factory
 {
 //

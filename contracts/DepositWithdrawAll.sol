@@ -106,7 +106,7 @@ contract DepositWithdrawAllFactory is Factory
 // Constants
 //
 
-    bytes32 constant public regName = "depositwithdrawlall";
+    bytes32 constant public regName = "depositwithdrawall";
     bytes32 constant public VERSION = "DepositWithdrawAllFactory v0.4.1";
 
 //

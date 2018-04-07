@@ -2,7 +2,7 @@
 
 file:   Invoices.sol
 ver:    0.4.1
-updated:25-Oct-2017
+updated:27-Nov-2017
 author: Darryl Morris
 email:  o0ragman0o AT gmail.com
 
@@ -32,6 +32,7 @@ See MIT Licence for further details.
     
 Release notes
 -------------
+* InvoicesFactory deployed to live chain at 0x9BA2a202802Eca472c107172b21C96D2123ACaB0
 * Non blocking deposits. 
 * Added refund address to Invoice for excess payments
 
@@ -237,7 +238,7 @@ contract Invoices is Registrar, WithdrawableMinItfc {
         require(_refundTo != 0x0);
         
         kAddr_ = address(new Invoice(_regName, _resource, _value, _refundTo));
-        add(kAddr_);
+        register(kAddr_);
         NewInvoice(kAddr_, _value, _refundTo);
     }
     
@@ -280,6 +281,7 @@ contract Invoices is Registrar, WithdrawableMinItfc {
     }
 }
 
+// InvoicesFactory deployed to live chain at 0x9BA2a202802Eca472c107172b21C96D2123ACaB0
 contract InvoicesFactory is Factory
 {
 //

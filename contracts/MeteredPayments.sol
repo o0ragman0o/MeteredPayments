@@ -2,7 +2,7 @@
 
 file:   MeteredPayments.sol
 ver:    0.4.1
-updated:26-Oct-2017
+updated:27-Nov-2017
 author: Darryl Morris (o0ragman0o)
 email:  o0ragman0o AT gmail.com
 
@@ -32,7 +32,9 @@ See MIT Licence for further details.
 
 Release Notes
 -------------
+* MeteredPaymentsFactory deployed to live chain at 0xde693A8aF3D0e584fc622357B37AE610fFB9C1A3
 * Using Math library and safe uint casting
+
 \******************************************************************************/
 
 pragma solidity ^0.4.13;
@@ -290,6 +292,7 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
     }
 }
 
+//Factory Deployed to live chain at 0xde693A8aF3D0e584fc622357B37AE610fFB9C1A3
 
 contract MeteredPaymentsFactory is Factory
 {
