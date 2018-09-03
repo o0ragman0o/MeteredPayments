@@ -1,8 +1,8 @@
 /******************************************************************************\
 
 file:   MeteredPayments.sol
-ver:    0.4.1
-updated:27-Nov-2017
+ver:    0.4.3
+updated:3-Sep-2018
 author: Darryl Morris (o0ragman0o)
 email:  o0ragman0o AT gmail.com
 
@@ -32,19 +32,17 @@ See MIT Licence for further details.
 
 Release Notes
 -------------
-* MeteredPaymentsFactory deployed to live chain at 0xde693A8aF3D0e584fc622357B37AE610fFB9C1A3
-* Using Math library and safe uint casting
+* Using Solidity 0.4.24 syntax
 
 \******************************************************************************/
 
-pragma solidity ^0.4.13;
+pragma solidity ^0.4.24;
 
 import "https://github.com/o0ragman0o/Math/Math.sol";
-import "https://github.com/o0ragman0o/ReentryProtected/ReentryProtected.sol";
 import "https://github.com/o0ragman0o/SandalStraps/contracts/Factory.sol";
 import "https://github.com/o0ragman0o/Withdrawable/contracts/Withdrawable.sol";
 
-contract MeteredPayments is RegBase, WithdrawableMinItfc
+contract MeteredPayments is RegBase, WithdrawableMinAbstract
 {
     using Math for uint;
     using Math for uint40;
@@ -62,7 +60,7 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
         uint128 rate;
     }
     
-    bytes32 public constant VERSION = "MeteredPayments v0.4.1";
+    bytes32 public constant VERSION = "MeteredPayments v0.4.3";
     
     /// @return 0.2% of payments for developer commission
     uint public constant COMMISION_DIV = 500;
@@ -99,7 +97,7 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
         uint _rate);
     
     /// @dev A SandalStraps compliant constructor
-    function MeteredPayments(address _creator, bytes32 _regName, address _owner)
+    constructor(address _creator, bytes32 _regName, address _owner)
         public
         RegBase(_creator, _regName, _owner)
     {
@@ -169,7 +167,7 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
         onlyOwner
         returns (bool)
     {
-        Deposit(msg.sender, msg.value);
+        emit Deposit(msg.sender, msg.value);
 
         // Full payment and commision is required
         Recipient storage recipient = recipients[_addr];
@@ -198,7 +196,7 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
         committedTime = committedTime.add(_period).sub(period).to40();
         committedPayments = committedPayments.add(payment).sub(ownerRefund);
         
-        PaymentsChanged(_addr, payment, _startTime, rate);
+        emit PaymentsChanged(_addr, payment, _startTime, rate);
 
         // Refund owner any difference of previously commited payments
         intlWithdraw(owner, owner, ownerRefund);
@@ -235,7 +233,7 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
         recipients[_new] = recipients[_old];
         delete recipients[_old];
 
-        RecipientChanged(_old, _new);
+        emit RecipientChanged(_old, _new);
         return true;
     }
     
@@ -245,7 +243,7 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
         public
         returns (bool)
     {
-        address[] memory arr;
+        address[] memory arr = new address[](1);
         arr[0] = msg.sender;
         return withdrawAllFor(arr);
     }
@@ -284,7 +282,7 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
         returns (bool)
     {
         if (_value > 0) {
-            Withdrawal(_from, _to, _value);
+            emit Withdrawal(_from, _to, _value);
             paidOut = paidOut.add(_value);
             _to.transfer(_value);
         }
@@ -292,7 +290,6 @@ contract MeteredPayments is RegBase, WithdrawableMinItfc
     }
 }
 
-//Factory Deployed to live chain at 0xde693A8aF3D0e584fc622357B37AE610fFB9C1A3
 
 contract MeteredPaymentsFactory is Factory
 {
@@ -301,7 +298,7 @@ contract MeteredPaymentsFactory is Factory
 //
 
     bytes32 constant public regName = "meteredpayments";
-    bytes32 constant public VERSION = "MeteredPaymentFactory v0.4.1";
+    bytes32 constant public VERSION = "MeteredPaymentsFactory v0.4.3";
 
 //
 // Functions
@@ -314,7 +311,7 @@ contract MeteredPaymentsFactory is Factory
     /// owner
     /// @dev On 0x0 value for _owner or _creator, ownership precedence is:
     /// `_owner` else `_creator` else msg.sender
-    function MeteredPaymentsFactory(address _creator, bytes32 _regName, address _owner)
+    constructor(address _creator, bytes32 _regName, address _owner)
         public
         Factory(_creator, regName, _owner)
     {
@@ -336,7 +333,7 @@ contract MeteredPaymentsFactory is Factory
         require(_regName != 0x0);
         _owner = _owner == 0x0 ? msg.sender : _owner;
         kAddr_ = address(new MeteredPayments(this, _regName, _owner));
-        Created(msg.sender, _regName, kAddr_);
+        emit Created(msg.sender, _regName, kAddr_);
     }
 }
 

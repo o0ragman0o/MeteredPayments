@@ -1,7 +1,7 @@
 /******************************************************************************\
 file:   DepositWithdrawAll.sol
-ver:    0.4.1
-updated:19-Oct-2017
+ver:    0.4.3
+updated:3-Sep-2017
 author: Darryl Morris
 email:  o0ragman0o AT gmail.com
 
@@ -16,23 +16,22 @@ See MIT Licence for further details.
     
 Release notes
 -------------
-* Removed overloaded events
-* Tweaked logging Withdrawal event
+* using solidity 0.4.24 syntax
 \******************************************************************************/
 
-pragma solidity ^0.4.13;
+pragma solidity ^0.4.24;
 
 import "https://github.com/o0ragman0o/SandalStraps/contracts/Factory.sol";
 import "https://github.com/o0ragman0o/Withdrawable/contracts/Withdrawable.sol";
 
-contract DepositWithdrawAll is RegBase, WithdrawableMinItfc
+contract DepositWithdrawAll is RegBase, WithdrawableMinAbstract
 {
 //
 // Constants
 //
 
     /// @return The version constant
-    bytes32 constant public VERSION = "DepositWithdrawAll v0.4.1";
+    bytes32 constant public VERSION = "DepositWithdrawAll v0.4.3";
 
 //
 // State
@@ -54,14 +53,14 @@ contract DepositWithdrawAll is RegBase, WithdrawableMinItfc
 //
 
 	/// @dev Sandalstraps complaint constructor
-    function DepositWithdrawAll(address _creator, bytes32 _regName, address _owner)
+    constructor(address _creator, bytes32 _regName, address _owner)
         public
         RegBase(_creator, _regName, _owner)
     {
         // forwardTo will be set to msg.sender of if _owner == 0x0 or _owner
         // otherwise
         forwardTo = owner;
-        ForwardingTo(forwardTo);
+        emit ForwardingTo(forwardTo);
     }
     
     /// @dev Default function is payable
@@ -69,7 +68,7 @@ contract DepositWithdrawAll is RegBase, WithdrawableMinItfc
         public
         payable 
     {
-        Deposit(msg.sender, msg.value);
+        emit Deposit(msg.sender, msg.value);
     }
     
     // @notice Change the fording address to `_forwardTo`
@@ -83,7 +82,7 @@ contract DepositWithdrawAll is RegBase, WithdrawableMinItfc
         // forwarding address 
         require(msg.sender == owner || msg.sender == forwardTo);
         forwardTo = _forwardTo;
-        ForwardingTo(_forwardTo);
+        emit ForwardingTo(_forwardTo);
         return true;
     }
 
@@ -93,8 +92,8 @@ contract DepositWithdrawAll is RegBase, WithdrawableMinItfc
     	public
     	returns (bool)
     {
-    	Withdrawal(forwardTo, forwardTo, this.balance);
-    	forwardTo.transfer(this.balance);
+    	emit Withdrawal(forwardTo, forwardTo, address(this).balance);
+    	forwardTo.transfer(address(this).balance);
     	return true;
     }
 }
@@ -107,7 +106,7 @@ contract DepositWithdrawAllFactory is Factory
 //
 
     bytes32 constant public regName = "depositwithdrawall";
-    bytes32 constant public VERSION = "DepositWithdrawAllFactory v0.4.1";
+    bytes32 constant public VERSION = "DepositWithdrawAllFactory v0.4.3";
 
 //
 // Functions
@@ -120,7 +119,7 @@ contract DepositWithdrawAllFactory is Factory
     /// owner
     /// @dev On 0x0 value for _owner or _creator, ownership precedence is:
     /// `_owner` else `_creator` else msg.sender
-    function DepositWithdrawAllFactory(address _creator, bytes32 _regName, address _owner)
+    constructor(address _creator, bytes32 _regName, address _owner)
         public
         Factory(_creator, regName, _owner)
     {
@@ -142,6 +141,6 @@ contract DepositWithdrawAllFactory is Factory
         require(_regName != 0x0);
         _owner = _owner == 0x0 ? msg.sender : _owner;
         kAddr_ = address(new DepositWithdrawAll(this, _regName, _owner));
-        Created(msg.sender, _regName, kAddr_);
+        emit Created(msg.sender, _regName, kAddr_);
     }
 }

@@ -1,8 +1,8 @@
 /******************************************************************************\
 
 file:   Invoices.sol
-ver:    0.4.1
-updated:27-Nov-2017
+ver:    0.4.3
+updated:3-Sep-2018
 author: Darryl Morris
 email:  o0ragman0o AT gmail.com
 
@@ -32,13 +32,11 @@ See MIT Licence for further details.
     
 Release notes
 -------------
-* InvoicesFactory deployed to live chain at 0x9BA2a202802Eca472c107172b21C96D2123ACaB0
-* Non blocking deposits. 
-* Added refund address to Invoice for excess payments
+* Using Solidity 0.4.24 syntax
 
 \******************************************************************************/
 
-pragma solidity ^0.4.13;
+pragma solidity ^0.4.24;
 
 import "https://github.com/o0ragman0o/Math/Math.sol";
 import "https://github.com/o0ragman0o/SandalStraps/contracts/Registrar.sol";
@@ -52,7 +50,7 @@ contract Invoice
 {
     using Math for uint;
     
-    bytes32 constant public VERSION = "Invoice v0.4.0";
+    bytes32 constant public VERSION = "Invoice v0.4.3";
     
     // Payments state used to prevent contract destruction after a payment
     bool noPayments = true;
@@ -78,14 +76,14 @@ contract Invoice
     event Deposit(address indexed _from, uint _value);
     
     /// @dev Logged upon a withdrawal
-    /// @param _by the address of the withdrawer
+    /// @param _from the address of the withdrawer
     /// @param _to Address to which value was sent
     /// @param _value The value in ether which was withdrawn
-    event Withdrawal(address indexed _by, address indexed _to, uint _value);
+    event Withdrawal(address indexed _from, address indexed _to, uint _value);
 
     /// @notice Create a new Invoice for invoice `_invoiceHash` with value of `_value`
     /// @param _value The value to be paid in ether.
-    function Invoice(
+    constructor(
             bytes32 _regName, bytes32 _resource,
             uint _value, address _refundTo)
         public
@@ -103,7 +101,8 @@ contract Invoice
         view
         returns (uint)
     {
-        return outstanding > this.balance ? outstanding - this.balance : 0;
+        return outstanding > address(this).balance ? 
+            outstanding - address(this).balance : 0;
     }
     
     /// @dev Accepts trivial transaction payments
@@ -112,7 +111,7 @@ contract Invoice
         payable
     {
         if (msg.value > 0) {
-            Deposit(msg.sender, msg.value);
+            emit Deposit(msg.sender, msg.value);
         }
     }
     
@@ -122,24 +121,26 @@ contract Invoice
         public
         returns (bool)
     {
-        if (this.balance > 0 && noPayments) {
-            // Have recieved ether. Blow the no payments flag.
+        if (address(this).balance > 0 && noPayments) {
+            // Have received ether. Blow the no payments flag.
             delete noPayments;
         }
         
-        uint payment = amountDue();
-        
+        // uint payment = amountDue();
+        uint payment = outstanding > address(this).balance ?
+            outstanding - address(this).balance : outstanding;
+            
         if (payment > 0) {
             outstanding = outstanding.sub(payment);
             // Send a payment to Invoice owner
-            Withdrawal(owner, owner, payment);
+            emit Withdrawal(owner, owner, payment);
             owner.transfer(payment);
         }
         
-        if (this.balance > 0) {
+        if (address(this).balance > 0) {
             // Refund any remain ether
-            Withdrawal(refundTo, refundTo, this.balance);
-            refundTo.transfer(this.balance);
+            emit Withdrawal(refundTo, refundTo, address(this).balance);
+            refundTo.transfer(address(this).balance);
         }
         return true;
     }
@@ -158,6 +159,19 @@ contract Invoice
         return true;
     }
 
+    /// @notice Change the refund address to `_addr`
+    /// @param _addr The new refund address
+    /// @return Boolean success value
+    function changeRefundTo(address _addr)
+        public
+        returns (bool)
+    {
+        // Only the refundee can change the refund address
+        require(msg.sender == refundTo);
+        refundTo = _addr;
+        return true;
+    }
+
     /// @dev An invoice can only be cancelled by calling 
     /// `Invoices.cancelInvoice()` if it has not yet recieved payments.
     function destroy()
@@ -165,7 +179,7 @@ contract Invoice
     {
         require(msg.sender == owner);
         // An invoice cannot be destroyed if a payment has been recieved
-        require(this.balance == 0 && noPayments);
+        require(address(this).balance == 0 && noPayments);
         selfdestruct(msg.sender);
     }
 }
@@ -174,9 +188,9 @@ contract Invoice
 //
 // Invoices is the invoice creator and payment collector.
 //
-contract Invoices is Registrar, WithdrawableMinItfc {
+contract Invoices is Registrar, WithdrawableMinAbstract {
     
-    bytes32 constant public VERSION = "Invoices v0.4.0";
+    bytes32 constant public VERSION = "Invoices v0.4.3";
     
     /// @return Commission divisor of 0.2% of payments for developer commission
     uint constant COMMISSION_DIV = 500;
@@ -192,7 +206,7 @@ contract Invoices is Registrar, WithdrawableMinItfc {
         uint _value,
         address indexed _refundTo);
 
-    function Invoices(address _creator, bytes32 _regName, address _owner)
+    constructor(address _creator, bytes32 _regName, address _owner)
         public
         Registrar(_creator, _regName, _owner)
     {
@@ -205,7 +219,7 @@ contract Invoices is Registrar, WithdrawableMinItfc {
         payable
     {
         if (msg.value > 0) {
-            Deposit(msg.sender, msg.value);
+            emit Deposit(msg.sender, msg.value);
         }
     }
     
@@ -217,8 +231,8 @@ contract Invoices is Registrar, WithdrawableMinItfc {
         returns (uint)
     {
         return
-            _addr == owner ? this.balance - this.balance / COMMISSION_DIV :
-            _addr == commissionWallet ? this.balance / COMMISSION_DIV :
+            _addr == owner ? address(this).balance - address(this).balance / COMMISSION_DIV :
+            _addr == commissionWallet ? address(this).balance / COMMISSION_DIV :
             0;
     }
     
@@ -239,7 +253,7 @@ contract Invoices is Registrar, WithdrawableMinItfc {
         
         kAddr_ = address(new Invoice(_regName, _resource, _value, _refundTo));
         register(kAddr_);
-        NewInvoice(kAddr_, _value, _refundTo);
+        emit NewInvoice(kAddr_, _value, _refundTo);
     }
     
     /// @notice Change resource of invoice `_kAddr` to `_resource`
@@ -273,15 +287,15 @@ contract Invoices is Registrar, WithdrawableMinItfc {
         public
         returns (bool)
     {
-        Withdrawal(msg.sender, commissionWallet, this.balance / COMMISSION_DIV);
-        commissionWallet.transfer(this.balance / COMMISSION_DIV);
-        Withdrawal(msg.sender, owner, this.balance);
-        owner.transfer(this.balance);
+        emit Withdrawal(msg.sender, commissionWallet, address(this).balance / COMMISSION_DIV);
+        commissionWallet.transfer(address(this).balance / COMMISSION_DIV);
+        emit Withdrawal(msg.sender, owner, address(this).balance);
+        owner.transfer(address(this).balance);
         return true;
     }
 }
 
-// InvoicesFactory deployed to live chain at 0x9BA2a202802Eca472c107172b21C96D2123ACaB0
+// InvoicesFactory deployed to live chain at 
 contract InvoicesFactory is Factory
 {
 //
@@ -292,7 +306,7 @@ contract InvoicesFactory is Factory
     bytes32 constant public regName = "invoices";
     
     /// @return version string
-    bytes32 constant public VERSION = "InvoicesFactory v0.4.0";
+    bytes32 constant public VERSION = "InvoicesFactory v0.4.3";
 
 //
 // Functions
@@ -305,8 +319,7 @@ contract InvoicesFactory is Factory
     /// owner
     /// @dev On 0x0 value for _owner or _creator, ownership precedence is:
     /// `_owner` else `_creator` else msg.sender
-    function InvoicesFactory(
-            address _creator, bytes32 _regName, address _owner)
+    constructor(address _creator, bytes32 _regName, address _owner)
         public
         Factory(_creator, regName, _owner)
     {
@@ -327,6 +340,6 @@ contract InvoicesFactory is Factory
     {
         require(_regName != 0x0);
         kAddr_ = address(new Invoices(this, _regName, _owner));
-        Created(msg.sender, _regName, kAddr_);
+        emit Created(msg.sender, _regName, kAddr_);
     }
 }

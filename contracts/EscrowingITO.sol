@@ -1,10 +1,10 @@
 /*
 file:   EscrowingITO.sol
-ver:    0.4.0
+ver:    0.4.3
 author: Darryl Morris
-date:   27-Nov-2017
+date:   3-Sep-2018
 email:  o0ragman0o AT gmail.com
-(c) Darryl Morris 2017
+(c) Darryl Morris 2018
 
 A SandalStraps compliant contract set for an 'Initial Token Offering' containing
 refund if fail and inter-token transfer/notification features.
@@ -64,19 +64,15 @@ See MIT Licence for further details.
 
 Release Notes
 -------------
-0.4.0
-* Made SandalStraps compliant
-* Using Withdrawable API
-* Added factory contract for SandalStraps deployment
-* Implimented KYC limit and flags
-* Using 'view' keyword in place of function constant
-* Changed EscrowingITOToken to EscrowingITO
-* added `function transferToMany(address[] _addrs, uint[] _amounts) returns (bool);`
+0.4.1
+* Fixed incorrect explicit return bug in `preventReentry` modified functions.
+  Proper method is to use named return parameters
+* Added `VERSION` to main contract
 
 */
 
 
-pragma solidity ^0.4.13;
+pragma solidity ^0.4.24;
 
 import "https://github.com/o0ragman0o/SandalStraps/contracts/Factory.sol";
 
@@ -218,7 +214,7 @@ contract ERC20Token
     {
         require(_amount <= balances[_from]);
 
-        Transfer(_from, _to, _amount);
+        emit Transfer(_from, _to, _amount);
         
         // avoid wasting gas on 0 token transfers
         if(_amount == 0) return true;
@@ -235,7 +231,7 @@ contract ERC20Token
         returns (bool)
     {
         allowed[msg.sender][_spender] = _amount;
-        Approval(msg.sender, _spender, _amount);
+        emit Approval(msg.sender, _spender, _amount);
         return true;
     }
 }
@@ -406,7 +402,7 @@ contract EscrowingITOAbstract
     /// @param _addrs An array of recipient addresses
     /// @param _amounts An array of token amounts to transfer for respective addresses
     /// @return Boolean success value
-    function transferToMany(address[] _addrs, uint[] _amounts) returns (bool);
+    function transferToMany(address[] _addrs, uint[] _amounts) public returns (bool);
 
     /// @notice Salvage `_amount` tokens at `_kaddr` and send them to `_to`
     /// @param _kAddr An ERC20 contract address
@@ -436,6 +432,8 @@ contract EscrowingITO is
 // Constants
 //
 
+    bytes32 public constant VERSION = "EscrowingITO v0.4.3";
+
     // Token fixed point for decimal places
     uint constant TOKEN = uint(10)**decimals; 
     
@@ -456,7 +454,7 @@ contract EscrowingITO is
     /// owner
     /// @dev On 0x0 value for _owner or _creator, ownership precedence is:
     /// `_owner` else `_creator` else msg.sender
-    function EscrowingITO(address _creator, bytes32 _regName, address _owner)
+    constructor(address _creator, bytes32 _regName, address _owner)
         public
         RegBase(_creator, _regName, _owner)
     {
@@ -580,12 +578,12 @@ contract EscrowingITO is
         // Throw if no tokens are going to be created
         require(tokens != 0);
         
-        Deposit(_addr, msg.value);
+        emit Deposit(_addr, msg.value);
         
         // Mint and transfer tokens
         balances[_addr] = balances[_addr].add(tokens);
         totalSupply = totalSupply.add(tokens);
-        Transfer(0x0, _addr, tokens);
+        emit Transfer(0x0, _addr, tokens);
         
         // Update holder payments
         etherContributed[_addr] = etherContributed[_addr].add(msg.value);
@@ -593,7 +591,7 @@ contract EscrowingITO is
         // Check KYC requirement
         if(etherContributed[_addr] > kycLimit && !mustKyc[_addr]) {
             mustKyc[_addr] = true;
-            Kyc(_addr, true);
+            emit Kyc(_addr, true);
         }
         
         // Update funds raised
@@ -607,20 +605,20 @@ contract EscrowingITO is
         public
         onlyOwner
         preventReentry()
-        returns (bool)
+        returns (bool success_)
     {
         require(fundSucceeded());
 
         itoSuccessful = true;
 
         // 1% Developer commission
-        Withdrawal(this, devWallet, this.balance.div(COMMISSION_DIV));
-        devWallet.transfer(this.balance.div(COMMISSION_DIV));
+        emit Withdrawal(this, devWallet, address(this).balance.div(COMMISSION_DIV));
+        devWallet.transfer(address(this).balance.div(COMMISSION_DIV));
 
         // Remaining 99% to the fund wallet
-        Withdrawal(this, fundWallet, this.balance);
-        fundWallet.transfer(this.balance);
-        return true;
+        emit Withdrawal(this, fundWallet, address(this).balance);
+        fundWallet.transfer(address(this).balance);
+        success_ = true;
     }
     
     // Direct refund to caller
@@ -637,7 +635,7 @@ contract EscrowingITO is
     function withdrawAllFor(address[] _addrs)
         public
         preventReentry()
-        returns (bool)
+        returns (bool success_)
     {
         if(!fundFailed()) {
             return false;
@@ -650,18 +648,18 @@ contract EscrowingITO is
             if(value > 0) {
                 // Show burned tokens in ledger
                 totalSupply = totalSupply.sub(balances[addr]);
-                Transfer(addr, 0x0, balances[addr]);
+                emit Transfer(addr, 0x0, balances[addr]);
         
                 // garbage collect
                 delete balances[addr];
                 delete etherContributed[addr];
         
-                Withdrawal(addr, addr, value);
+                emit Withdrawal(addr, addr, value);
                 refunded = refunded.add(value);
                 addr.transfer(value);
             }
         }
-        return true;
+        success_ = true;
     }
     
     function clearKyc(address[] _addrs)
@@ -671,7 +669,7 @@ contract EscrowingITO is
         returns (bool)
     {
         for(uint i; i < _addrs.length; i++) {
-            Kyc(_addrs[i], false);
+            emit Kyc(_addrs[i], false);
             delete mustKyc[_addrs[i]];
         }
         return true;
@@ -740,10 +738,10 @@ contract EscrowingITO is
         public
         onlyOwner
         preventReentry
-        returns (bool) 
+        returns (bool success_) 
     {
         require(ERC20Token(_kAddr).transfer(_to, _amount));
-        return true;
+        success_ = true;
     }
 }
 
@@ -758,7 +756,7 @@ contract EscrowingITOFactory is Factory
     bytes32 constant public regName = "escrowingito";
     
     /// @return version string
-    bytes32 constant public VERSION = "EscrowingITOFactory v0.4.0";
+    bytes32 constant public VERSION = "EscrowingITOFactory v0.4.3";
 
 //
 // Functions
@@ -771,8 +769,7 @@ contract EscrowingITOFactory is Factory
     /// owner
     /// @dev On 0x0 value for _owner or _creator, ownership precedence is:
     /// `_owner` else `_creator` else msg.sender
-    function EscrowingITOFactory(
-            address _creator, bytes32 _regName, address _owner)
+    constructor(address _creator, bytes32 _regName, address _owner)
         public
         Factory(_creator, regName, _owner)
     {
@@ -793,6 +790,6 @@ contract EscrowingITOFactory is Factory
     {
         _owner = _owner == 0x0 ? msg.sender : _owner;
         kAddr_ = address(new EscrowingITO(this, _regName, _owner));
-        Created(msg.sender, _regName, kAddr_);
+        emit Created(msg.sender, _regName, kAddr_);
     }
 }

@@ -1,8 +1,8 @@
 /******************************************************************************\
 
 file:   Forwarder.sol
-ver:    0.4.0
-updated:17-Oct-2017
+ver:    0.4.3
+updated:3-Sep-20018
 author: Darryl Morris (o0ragman0o)
 email:  o0ragman0o AT gmail.com
 
@@ -19,12 +19,10 @@ See MIT Licence for further details.
 
 Release Notes
 -------------
-* Name change from 'Redirector' to 'Forwarder'
-* Changes state name from 'payTo' to 'forwardTo'
-
+* Using Solidity 0.4.24 syntax
 \******************************************************************************/
 
-pragma solidity ^0.4.13;
+pragma solidity ^0.4.24;
 
 import "https://github.com/o0ragman0o/SandalStraps/contracts/Factory.sol";
 
@@ -34,7 +32,7 @@ contract Forwarder is RegBase {
 //
 
     /// @return The contract's version constant
-    bytes32 constant public VERSION = "Forwarder v0.4.0";
+    bytes32 constant public VERSION = "Forwarder v0.4.3";
 
 //
 // State
@@ -64,7 +62,7 @@ contract Forwarder is RegBase {
     /// @param _creator The creating address
     /// @param _regName The contracts registration name
     /// @param _owner The owner address for the contract
-    function Forwarder(address _creator, bytes32 _regName, address _owner)
+    constructor(address _creator, bytes32 _regName, address _owner)
         public
         RegBase(_creator, _regName, _owner)
     {
@@ -78,8 +76,8 @@ contract Forwarder is RegBase {
         public
         payable 
     {
-        Forwarded(msg.sender, forwardTo, msg.value);
-        forwardTo.call.value(msg.value)(msg.data);
+        emit Forwarded(msg.sender, forwardTo, msg.value);
+        require(forwardTo.call.value(msg.value)(msg.data));
     }
 
     /// @notice Change the fording address to `_forwardTo`
@@ -107,7 +105,7 @@ contract ForwarderFactory is Factory
     bytes32 constant public regName = "forwarder";
     
     /// @return version string
-    bytes32 constant public VERSION = "ForwarderFactory v0.4.0";
+    bytes32 constant public VERSION = "ForwarderFactory v0.4.3";
 
 //
 // Functions
@@ -120,11 +118,12 @@ contract ForwarderFactory is Factory
     /// owner
     /// @dev On 0x0 value for _owner or _creator, ownership precedence is:
     /// `_owner` else `_creator` else msg.sender
-    function ForwarderFactory(
-            address _creator, bytes32 _regName, address _owner) public
+    constructor(address _creator, bytes32 _regName, address _owner)
+        public
         Factory(_creator, regName, _owner)
     {
         // _regName is ignored as `regName` is already a constant
+        _regName; // Not passed to super. Quiet compiler warning
         // nothing to construct
     }
 
@@ -141,6 +140,6 @@ contract ForwarderFactory is Factory
         returns (address kAddr_)
     {
         kAddr_ = address(new Forwarder(msg.sender, _regName, _owner));
-        Created(msg.sender, _regName, kAddr_);
+        emit Created(msg.sender, _regName, kAddr_);
     }
 }
